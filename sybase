@@ -1,0 +1,1694 @@
+CREATE DATABASE BANCAONLINE ON DEFAULT = 7
+
+go
+
+USE BANCAONLINE
+
+go
+
+CREATE TABLE IMG_SEGURIDAD
+( cod_imagen VARCHAR(8) NOT NULL,
+imagen IMAGE NOT NULL,
+PRIMARY KEY(cod_imagen))
+
+go
+
+CREATE TABLE CLIENTE
+(CI VARCHAR(10) NOT NULL,
+nombre VARCHAR(40) NOT NULL,
+apellido VARCHAR(40) NOT NULL,
+tlf VARCHAR(15) NULL,
+correo VARCHAR(50) NULL,
+PRIMARY KEY (CI))
+
+go
+
+CREATE TABLE USUARIO
+( CI VARCHAR(10),
+nick VARCHAR(15) NOT NULL,
+pass VARCHAR(8) NOT NULL,
+correo VARCHAR(50) NOT NULL,
+p1 VARCHAR(200) NOT NULL,
+r1 VARCHAR(50) NOT NULL,
+clave_especial VARCHAR(4) NOT NULL,
+cod_imagen VARCHAR(8) NOT NULL,
+estado VARCHAR(20) NULL,
+n_error int NULL,
+PRIMARY KEY(CI, nick),
+UNIQUE(nick),
+FOREIGN KEY (CI) REFERENCES CLIENTE(CI),
+FOREIGN KEY (cod_imagen) REFERENCES IMG_SEGURIDAD(cod_imagen))              
+
+go
+
+CREATE TABLE CUENTA
+( CI VARCHAR(10),
+n_cuenta VARCHAR(50) NOT NULL,
+tipo_cuenta VARCHAR(30) NOT NULL, 
+PRIMARY KEY (CI, n_cuenta, tipo_cuenta),
+UNIQUE(n_cuenta),
+FOREIGN KEY(CI) REFERENCES CLIENTE(CI))
+
+go
+
+CREATE TABLE TARJETAS
+( CI VARCHAR(10),
+n_tarj VARCHAR(50) NOT NULL,
+tipo_tarj VARCHAR(30) NOT NULL,
+nom_titular VARCHAR(40) NOT NULL,
+limite NUMERIC NULL,
+f_inicio DATE NOT NULL,
+f_vencimiento DATE NOT NULL,
+pago_total NUMERIC NULL,
+n_cta_asoc VARCHAR(50) NULL,
+descrip VARCHAR(100) NULL,
+PRIMARY KEY (CI, n_tarj),
+FOREIGN KEY(CI) REFERENCES CLIENTE(CI),
+UNIQUE(n_tarj))
+
+go
+
+CREATE TABLE TRANS_CUENTAS
+( n_cta VARCHAR(50) NOT NULL,
+referencia INT NOT NULL,
+descrip VARCHAR(100) NOT NULL,
+monto NUMERIC NOT NULL,
+saldo_fin NUMERIC NOT NULL,
+fecha date NOT NULL,
+PRIMARY KEY (n_cta, referencia),
+FOREIGN KEY(n_cta) REFERENCES CUENTA(n_cuenta))
+
+go
+
+CREATE TABLE TRANS_TARJETAS
+(n_tarj VARCHAR(50) NOT NULL,
+referencia INT NOT NULL,
+descrip VARCHAR(100) NOT NULL,
+monto NUMERIC NOT NULL,
+fecha DATE NOT NULL,
+PRIMARY KEY (n_tarj, referencia),
+FOREIGN KEY(n_tarj) REFERENCES TARJETAS(n_tarj))
+
+go 
+
+CREATE TABLE TRANSFERENCIAS
+(fecha DATE NOT NULL,
+referencia INT NOT NULL,
+CI VARCHAR(10),
+n_cta_propia VARCHAR(50) NOT NULL,
+CI_tercero VARCHAR(10) NOT NULL,
+nombre_terc VARCHAR(50) NOT NULL,
+n_cta_terc VARCHAR(50) NOT NULL,
+monto NUMERIC NOT NULL,
+comentario VARCHAR(200) NULL,
+tipo_banco VARCHAR(15) NOT NULL,
+PRIMARY KEY (CI,referencia),
+FOREIGN KEY (CI) REFERENCES CLIENTE(CI),
+FOREIGN KEY (n_cta_propia) REFERENCES CUENTA(n_cuenta))
+
+go
+
+CREATE TABLE RESPALDO_CLAVES
+(
+    fecha_mod DATE NULL,
+    nick VARCHAR(15) NOT NULL,
+    pass_viejo VARCHAR(8) NOT NULL,
+    pass_nuevo VARCHAR(8) NOT NULL,
+PRIMARY KEY(nick,pass_viejo,pass_nuevo)
+)
+
+go
+
+
+CREATE TABLE RESPALDO_TARJETAS
+(num NUMERIC(12,0) IDENTITY,
+fecha_mod DATE NOT NULL,
+CI VARCHAR(10) NOT NULL,
+n_tarj VARCHAR(50) NOT NULL,
+monto_viejo NUMERIC NULL,
+monto_nuevo NUMERIC NULL,
+PRIMARY KEY (num)
+)
+
+go
+
+CREATE TABLE RESPALDO_TRANS_TARJETAS
+(num NUMERIC(12,0) IDENTITY,
+n_tarj VARCHAR(50) NOT NULL,
+referencia INT NOT NULL,
+descrip VARCHAR(100) NOT NULL,
+monto NUMERIC NOT NULL,
+fecha DATE NOT NULL,
+PRIMARY KEY(num)
+)
+
+go
+
+CREATE TABLE RES_TRANS_CUENTAS
+(num NUMERIC(12,0) IDENTITY,
+n_cta VARCHAR(50) NOT NULL,
+referencia INT NOT NULL,
+descrip VARCHAR(100) NOT NULL,
+monto NUMERIC NOT NULL,
+saldo_fin NUMERIC NOT NULL,
+fecha date NOT NULL,
+PRIMARY KEY (num))
+
+go
+
+CREATE TABLE RESPALDO_USUARIO
+( num NUMERIC(12,0) IDENTITY,
+  fecha DATE NOT NULL,
+  CI VARCHAR(10) NOT NULL,
+  nick VARCHAR(15) NOT NULL,
+  pass VARCHAR(8) NOT NULL,
+PRIMARY KEY (num)
+)
+CREATE PROCEDURE ins_TRANS_CUENTAS
+    @n_cta VARCHAR(50),
+    @referencia INT,
+    @descrip VARCHAR(100),
+    @monto NUMERIC,
+    @fecha DATE
+    
+AS
+BEGIN
+    DECLARE 
+    @saldo_fin NUMERIC
+
+    IF EXISTS (SELECT C.n_cuenta, T.n_cta FROM CUENTA C, TRANS_CUENTAS T WHERE @n_cta=C.n_cuenta AND @n_cta=T.n_cta)
+    BEGIN
+    SELECT @saldo_fin=SUM(monto)+(@monto) FROM TRANS_CUENTAS WHERE @n_cta=n_cta
+    INSERT INTO TRANS_CUENTAS VALUES (@n_cta,@referencia,@descrip,@monto,@saldo_fin,@fecha)
+    END
+
+    IF EXISTS (SELECT n_cuenta FROM CUENTA WHERE @n_cta=n_cuenta AND @n_cta NOT IN(SELECT n_cta FROM TRANS_CUENTAS WHERE @n_cta=n_cta))
+    INSERT INTO TRANS_CUENTAS VALUES (@n_cta,@referencia,@descrip,@monto,@monto,@fecha)
+END
+
+go
+
+CREATE PROCEDURE validarLOGIN
+    @nick VARCHAR(15),
+    @pass VARCHAR(8)
+
+AS
+BEGIN
+IF NOT EXISTS (SELECT nick FROM USUARIO WHERE @nick=nick)
+PRINT "EL NOMBRE DE USUARIO NO EXISTE"
+
+IF (SELECT n_error FROM USUARIO WHERE @nick=nick) < 3
+BEGIN
+
+    IF EXISTS (SELECT * FROM USUARIO WHERE @nick=nick AND @pass=pass )
+    BEGIN
+    UPDATE USUARIO SET estado="CONECTADO" WHERE @nick=nick AND @pass=pass
+    UPDATE USUARIO SET n_error=0 WHERE @nick=nick AND @pass=pass 
+    PRINT "USTED ESTA CONECTADO."
+    END
+    
+    ELSE 
+    BEGIN
+    UPDATE USUARIO SET n_error=(n_error)+1 WHERE @nick=nick
+    PRINT "ERROR: LA CLAVE ES INCORRECTA."
+    END
+
+END
+
+IF (SELECT n_error FROM USUARIO WHERE @nick=nick) >=3
+BEGIN
+UPDATE USUARIO SET estado="BLOQUEADO" WHERE @nick=nick
+PRINT "SU USUARIO ESTA BLOQUEADO. POR FAVOR REACTIVE SU CUENTA ANTES DE INGRESAR."
+END
+END
+
+go
+
+CREATE PROCEDURE reactivarCUENTA
+    @nick VARCHAR(15),
+    @p1 VARCHAR(200),
+    @r1 VARCHAR(50),
+    @clave_especial VARCHAR(4),
+    @pass_nuevo VARCHAR(8)
+
+AS
+BEGIN
+IF EXISTS (SELECT nick FROM USUARIO WHERE @nick=nick AND @p1=p1 AND @r1=r1 AND @clave_especial=clave_especial AND estado="BLOQUEADO" )
+BEGIN
+    IF NOT EXISTS (SELECT @pass_nuevo, A.pass_viejo, B.pass FROM RESPALDO_CLAVES A, USUARIO B WHERE @nick=B.nick AND @pass_nuevo=pass_viejo)
+    IF NOT EXISTS (SELECT pass FROM USUARIO WHERE @nick=nick AND pass=@pass_nuevo)
+    BEGIN
+    IF EXISTS (SELECT @pass_nuevo, pass FROM USUARIO WHERE @pass_nuevo LIKE '%[A-Z]%' AND @pass_nuevo LIKE '%[0-9]%' AND @pass_nuevo LIKE '%[a-z]%')
+    BEGIN
+    UPDATE USUARIO SET pass=@pass_nuevo WHERE @nick=nick
+    UPDATE USUARIO SET estado="DESCONECTADO"
+    UPDATE USUARIO SET n_error=0
+    PRINT "CUENTA REACTIVADA. CLAVE CAMBIADA EXITOSAMENTE"
+    END
+	ELSE PRINT "ERROR: LA CLAVE DEBE POSEER MAYUSCULAS, MINUSCULAS Y NUMEROS Y DEBE SER DIFERENTE A LAS ANTERIORES"
+    END
+    ELSE PRINT "ERROR: LA CLAVE NUEVA DEBE SER DIFERENTE A LAS ANTERIORES"
+    ELSE PRINT "ERROR: LA CLAVE NUEVA DEBE SER DIFERENTE A LAS ANTERIORES"
+END
+
+ELSE
+PRINT "LA CUENTA DE USUARIO NO ESTA BLOQUEADA O LOS DATOS NO COINCIDEN."
+END
+
+go
+
+CREATE PROCEDURE consultaCUENTAS
+    @nick VARCHAR(15),
+    @pass VARCHAR(8),
+    @n_cta VARCHAR(50)
+AS
+BEGIN
+    DECLARE @saldo NUMERIC
+
+IF EXISTS (SELECT U.nick, U.pass, C.n_cuenta FROM USUARIO U, CUENTA C WHERE @nick=U.nick AND @pass=U.pass AND C.n_cuenta=@n_cta AND U.estado="CONECTADO" AND U.CI=C.CI)
+    BEGIN
+    SELECT @saldo=SUM(monto) FROM TRANS_CUENTAS WHERE n_cta=@n_cta
+    SELECT n_cta as CUENTA, referencia as REFERENCIA, descrip as DESCRIPCION, monto as MONTO, saldo_fin as 'BALANCE', fecha as FECHA, @saldo as 'SALDO FINAL' FROM TRANS_CUENTAS WHERE @n_cta=n_cta ORDER BY FECHA DESC
+    END
+ELSE PRINT "USTED ESTA DESCONECTADO. POR FAVOR, CONECTESE PARA VER SUS TRANSACCIONES."
+END
+
+go
+
+CREATE PROCEDURE consultaTARJETA
+    @nick VARCHAR(15),
+    @pass VARCHAR(8),
+    @n_tarj VARCHAR(50)
+AS
+BEGIN
+    DECLARE @a_pagar NUMERIC
+
+IF EXISTS (SELECT U.nick, U.pass, T.n_tarj FROM USUARIO U, TARJETAS T WHERE @nick=U.nick AND @pass=U.pass AND T.n_tarj=@n_tarj AND U.estado="CONECTADO" AND U.CI=T.CI)
+    BEGIN
+    SELECT @a_pagar=SUM(monto) FROM TRANS_TARJETAS WHERE n_tarj=@n_tarj
+    SELECT n_tarj as 'Nº TARJETA', referencia as REFERENCIA, descrip as DESCRIPCION, monto as MONTO, fecha as FECHA, @a_pagar as 'PAGO TOTAL' FROM TRANS_TARJETAS WHERE @n_tarj=n_tarj
+    ORDER BY FECHA DESC
+    END
+ELSE PRINT "USTED ESTA DESCONECTADO. POR FAVOR, CONECTESE PARA VER SUS TRANSACCIONES."
+END
+
+go
+
+
+CREATE PROCEDURE validarREGISTRO
+    @ced varchar(10),
+    @tarj_deb varchar(50),
+    @nick varchar(15),
+    @pass varchar(8),
+    @correo varchar(50),
+    @p1 varchar(200),
+    @r1 varchar(50),
+    @clave_especial varchar(4),
+    @cod_imagen varchar(8)
+
+AS
+BEGIN
+
+IF NOT EXISTS (SELECT C.CI, T.n_tarj FROM CLIENTE C, TARJETAS T WHERE C.CI=@ced AND T.CI=@ced AND T.n_tarj=@tarj_deb AND T.tipo_tarj="DEBITO")
+    PRINT "ERROR: USTED NO ES CLIENTE DEL BLANCO O EL NUMERO DE TARJETA DE DEBITO QUE INGRESO NO ES CORRECTO."
+ELSE
+    BEGIN
+        IF EXISTS (SELECT nick FROM USUARIO WHERE @nick=nick) PRINT "EL NOMBRE DE USUARIO YA EXISTE."
+        ELSE
+        BEGIN
+            IF NOT EXISTS (SELECT @pass WHERE @pass LIKE '%[A-Z]%' AND @pass LIKE '%[0-9]%' AND @pass LIKE '%[a-z]%')
+            PRINT "ERROR: SU CLAVE DEBE TENER LETRAS MAYUSCULAS, MINUSCULAS Y NUMEROS."
+            ELSE
+            BEGIN
+            INSERT INTO USUARIO VALUES(@ced,@nick,@pass,@correo,@p1,@r1,@clave_especial,@cod_imagen,"DESCONECTADO",0)
+            PRINT "REGISTRO EXITOSO."
+            END
+        END
+    END
+
+END
+
+go
+
+CREATE PROCEDURE validarPAGOTARJETA
+@ced VARCHAR(10),
+@cuenta VARCHAR(50),
+@pago NUMERIC,
+@n_tarjeta VARCHAR(50),
+@referencia INT
+AS
+BEGIN
+	DECLARE @fecha DATE,
+            @saldo NUMERIC
+IF EXISTS(SELECT A.n_cuenta, B.n_tarj, C.CI FROM CUENTA A, TARJETAS B, USUARIO C WHERE n_tarj=@n_tarjeta AND A.n_cuenta=@cuenta AND C.estado="CONECTADO")
+IF (SELECT SUM(monto) FROM TRANS_CUENTAS WHERE @cuenta=n_cta)>@pago 
+
+    IF(SELECT pago_total FROM TARJETAS WHERE n_tarj=@n_tarjeta)>=@pago
+    BEGIN
+    SELECT @fecha=getdate()
+    SELECT @saldo=SUM(monto)-(@pago) FROM TRANS_CUENTAS
+    UPDATE TARJETAS SET pago_total=pago_total-@pago where n_tarj=@n_tarjeta
+    INSERT INTO TRANS_CUENTAS VALUES(@cuenta,@referencia,"PAGO DE TARJETA DE CREDITO",-(@pago),@saldo, @fecha)
+    INSERT INTO TRANS_TARJETAS VALUES(@n_tarjeta,@referencia,"PAGO DE TARJETA DE CREDITO",-(@pago), @fecha)
+    PRINT "PAGO EXITOSO"
+    END 
+    ELSE PRINT "EL MONTO QUE INGRESO ES MAYOR QUE SU PAGO TOTAL"
+ELSE PRINT "LA CUENTA NO POSEE EL SALDO SUFICIENTE"
+ELSE PRINT "LOS DATOS NO COINCIDEN O USUARIO DESCONECTADO"
+END
+
+go
+
+CREATE PROCEDURE ins_TRANS_TARJETAS
+    @n_tarj VARCHAR(50),
+    @referencia INT,
+    @descrip VARCHAR(100),
+    @monto NUMERIC,
+    @fecha DATE
+    
+AS
+BEGIN
+
+    DECLARE @monto_total NUMERIC,
+            @n_cta_asoc VARCHAR(50),
+            @monto_cuenta NUMERIC
+        SELECT @monto_total=SUM(monto)+@monto FROM TRANS_TARJETAS WHERE n_tarj=@n_tarj
+        SELECT @n_cta_asoc=n_cta_asoc FROM TARJETAS WHERE n_tarj=@n_tarj
+        SELECT @monto_cuenta=SUM(monto)-(@monto) FROM TRANS_CUENTAS WHERE @n_cta_asoc=n_cta
+    IF EXISTS (SELECT A.n_tarj, B.n_tarj FROM TARJETAS A, TRANS_TARJETAS B WHERE @n_tarj=A.n_tarj AND @n_tarj=B.n_tarj)
+    BEGIN
+        IF ( SELECT limite FROM TARJETAS WHERE @n_tarj=n_tarj AND tipo_tarj="CREDITO")>=@monto_total 
+            BEGIN
+            INSERT INTO TRANS_TARJETAS VALUES (@n_tarj,@referencia,@descrip,@monto,@fecha)
+            UPDATE TARJETAS SET pago_total=@monto_total WHERE @n_tarj=n_tarj
+            END
+        ELSE
+            BEGIN
+            IF ( SELECT tipo_tarj FROM TARJETAS WHERE @n_tarj=n_tarj)="DEBITO"
+            BEGIN
+                INSERT INTO TRANS_TARJETAS VALUES (@n_tarj,@referencia,@descrip,@monto,@fecha)
+                INSERT INTO TRANS_CUENTAS VALUES (@n_cta_asoc,@referencia,@descrip,-(@monto),@monto_cuenta,@fecha) 
+            END
+            ELSE (SELECT("EL VALOR NO PUEDE SOBREPASAR EL LIMITE DE LA TARJETA"))
+            END
+   END
+    IF EXISTS (SELECT n_tarj FROM TARJETAS WHERE @n_tarj=n_tarj AND @n_tarj NOT IN (SELECT n_tarj FROM TRANS_TARJETAS WHERE @n_tarj=n_tarj))
+    BEGIN
+    INSERT INTO TRANS_TARJETAS VALUES(@n_tarj,@referencia,@descrip,@monto,@fecha)
+    IF ( SELECT tipo_tarj FROM TARJETAS WHERE @n_tarj=n_tarj)="CREDITO"
+    UPDATE TARJETAS SET pago_total=@monto WHERE @n_tarj=n_tarj
+    ELSE
+    INSERT INTO TRANS_CUENTAS VALUES (@n_cta_asoc,@referencia,@descrip,-(@monto),@monto_cuenta,@fecha) 
+ 
+  END
+END
+
+go
+
+CREATE PROCEDURE TRANSFERENCIA
+@cod_imagen VARCHAR(10),
+@ced_propio VARCHAR(10),
+@cta_propia VARCHAR(50),
+@nombre_terc VARCHAR(50),
+@ced_tercero VARCHAR(10),
+@cta_tercero VARCHAR(50),
+@monto NUMERIC,
+@coment VARCHAR(200),
+@t_banco VARCHAR(15)
+AS
+BEGIN
+    DECLARE @fecha DATE, 
+            @saldo_propio NUMERIC, 
+            @saldo_tercero NUMERIC,
+            @referencia INT
+            SELECT @fecha=GETDATE()
+            SELECT @saldo_propio=SUM(monto)-(@monto) FROM TRANS_CUENTAS WHERE @cta_propia=n_cta
+            SELECT @saldo_tercero=SUM(monto)+(@monto) FROM TRANS_CUENTAS WHERE @cta_tercero=n_cta
+            IF EXISTS (SELECT referencia FROM TRANSFERENCIAS WHERE CI=@ced_propio)
+            SELECT @referencia=SUM(referencia)+1 from TRANSFERENCIAS WHERE CI=@ced_propio
+            ELSE (SELECT @referencia=1)
+
+IF EXISTS ( SELECT CI FROM USUARIO WHERE @ced_propio=CI AND @cod_imagen=cod_imagen AND estado="CONECTADO")
+BEGIN
+    IF(@t_banco)="PROPIO"
+    BEGIN
+        IF (SELECT SUM(B.monto) FROM CUENTA A, TRANS_CUENTAS B WHERE @ced_propio=A.CI AND @cta_propia=A.n_cuenta AND @cta_propia=B.n_cta)>@monto
+        BEGIN
+            IF EXISTS (SELECT CI FROM CUENTA WHERE @ced_tercero=CI AND @cta_tercero=n_cuenta)
+            BEGIN
+                INSERT INTO TRANS_CUENTAS VALUES (@cta_propia,@referencia,"TRANSFERENCIA BANCO PROPIO",-(@monto),@saldo_propio,@fecha)
+                INSERT INTO TRANS_CUENTAS VALUES (@cta_tercero,@referencia,"TRANSFERENCIA BANCO PROPIO",(@monto),@saldo_tercero,@fecha)
+                INSERT INTO TRANSFERENCIAS VALUES (@fecha,@referencia,@ced_propio,@cta_propia,@nombre_terc,@ced_tercero,@cta_tercero,@monto,@coment,"PROPIO")
+                PRINT "TRANSFERENCIA EXITOSA."
+            END
+            ELSE PRINT "LA CUENTA INGRESADA NO EXISTE."
+        END
+        ELSE PRINT "LOS DATOS SON INCORRECTOS O NO POSEE EL SALDO SUFICIENTE"
+    END
+    IF(@t_banco)="OTROS"
+    BEGIN
+    INSERT INTO TRANS_CUENTAS VALUES (@cta_propia,@referencia,"TRANSFERENCIA OTROS BANCOS",-(@monto),@saldo_propio,@fecha)
+    INSERT INTO TRANSFERENCIAS VALUES (@fecha,@referencia,@ced_propio,@cta_propia,@nombre_terc,@ced_tercero,@cta_tercero,@monto,@coment,"OTROS")
+    PRINT "TRANSFERENCIA EXITOSA"
+    END
+END
+ELSE 
+BEGIN
+UPDATE USUARIO SET n_error=n_error+1 WHERE CI=@ced_propio
+PRINT "ERROR: LA IMAGEN DE SEGURIDAD NO ES CORRECTA O EL USUARIO ESTA BLOQUEADO/DESCONECTADO."
+END
+END
+
+
+
+go
+
+CREATE PROCEDURE validarLOGOUT 
+    @nick VARCHAR(15),
+    @pass VARCHAR(8)
+AS
+BEGIN
+    IF EXISTS (SELECT nick, pass FROM USUARIO WHERE nick=@nick AND pass=@pass AND estado="CONECTADO")
+    BEGIN
+    UPDATE USUARIO SET estado="DESCONECTADO" WHERE nick=@nick
+    PRINT "USTED ESTA DESCONECTADO."
+    END
+END
+CREATE TRIGGER respaldarCLAVES ON USUARIO
+FOR UPDATE
+AS
+BEGIN
+DECLARE @fecha DATE,
+        @nick VARCHAR(15),
+        @pass_viejo VARCHAR(8),
+        @pass_nuevo VARCHAR(8)
+        SELECT @fecha=GETDATE()
+        SELECT @pass_viejo=pass FROM deleted
+        SELECT @pass_nuevo=pass FROM inserted
+
+IF UPDATE(pass)
+BEGIN
+SELECT @nick=USUARIO.nick FROM USUARIO, inserted WHERE inserted.pass=USUARIO.pass
+INSERT INTO RESPALDO_CLAVES VALUES(@fecha,@nick,@pass_viejo,@pass_nuevo)
+END
+END
+
+go
+
+CREATE TRIGGER respaldoTARJETAS ON TARJETAS
+FOR UPDATE
+AS
+BEGIN
+    DECLARE @fecha DATE,
+            @ced VARCHAR(10),
+            @n_tarj VARCHAR(50),
+            @monto_viejo NUMERIC,
+            @monto_nuevo NUMERIC 
+
+IF UPDATE(pago_total)
+BEGIN
+    SELECT @fecha=GETDATE()
+    SELECT @ced=TARJETAS.CI FROM TARJETAS, inserted WHERE inserted.pago_total=TARJETAS.pago_total
+    SELECT @n_tarj=TARJETAS.n_tarj FROM TARJETAS, inserted WHERE inserted.pago_total=TARJETAS.pago_total
+    SELECT @monto_viejo=pago_total FROM deleted
+    SELECT @monto_nuevo=pago_total FROM inserted
+    INSERT INTO RESPALDO_TARJETAS VALUES (@fecha,@ced,@n_tarj,@monto_viejo,@monto_nuevo)
+END 
+END
+
+go
+
+
+CREATE TRIGGER res_TRANS_TARJETAS ON TRANS_TARJETAS
+FOR INSERT 
+AS
+BEGIN
+    DECLARE @n_tarj VARCHAR(50),
+            @referencia INT,
+            @descrip VARCHAR(100),
+            @monto NUMERIC,
+            @fecha DATE
+
+            SELECT @n_tarj=n_tarj FROM inserted
+            SELECT @referencia=referencia FROM inserted
+            SELECT @descrip=descrip FROM inserted
+            SELECT @monto=monto FROM inserted
+            SELECT @fecha=fecha FROM inserted
+
+    INSERT INTO RESPALDO_TRANS_TARJETAS VALUES (@n_tarj,@referencia,@descrip,@monto,@fecha)
+END
+
+go
+
+CREATE TRIGGER res_TRANS_CUENTAS ON TRANS_CUENTAS
+FOR INSERT 
+AS
+BEGIN
+    DECLARE @n_cta VARCHAR(50),
+            @referencia INT,
+            @descrip VARCHAR(100),
+            @monto NUMERIC,
+            @saldo_fin NUMERIC,
+            @fecha DATE
+
+            SELECT @n_cta=n_cta FROM inserted
+            SELECT @referencia=referencia FROM inserted
+            SELECT @descrip=descrip FROM inserted
+            SELECT @monto=monto FROM inserted
+            SELECT @saldo_fin=saldo_fin FROM inserted
+            SELECT @fecha=fecha FROM inserted
+
+    INSERT INTO RES_TRANS_CUENTAS VALUES (@n_cta,@referencia,@descrip,@monto,@saldo_fin,@fecha)
+END
+
+go
+
+CREATE TRIGGER bloquearUSUARIO ON USUARIO
+FOR UPDATE
+AS
+BEGIN
+    DECLARE @n_error INT
+IF UPDATE(n_error)
+BEGIN
+    SELECT @n_error=n_error FROM USUARIO
+    IF (@n_error)>=3
+    UPDATE USUARIO SET estado="BLOQUEADO"
+END
+END
+
+go
+
+CREATE TRIGGER respaldarUSUARIO ON USUARIO
+FOR DELETE
+AS
+BEGIN
+DECLARE @fecha DATE,
+        @nick VARCHAR(15),
+        @pass VARCHAR(8),
+        @ced VARCHAR(10)
+        SELECT @fecha=GETDATE()
+        SELECT @nick=nick FROM deleted
+	    SELECT @pass=pass FROM deleted
+        SELECT @ced=CI FROM deleted
+INSERT INTO RESPALDO_USUARIO VALUES(@fecha,@ced,@nick,@pass)
+END
+CREATE VIEW VER_PRO_TARJETAS (TIPO,NUMERO,DESCRIPCION,LIMITE,PAGO,CUENTA)
+AS SELECT tipo_tarj, n_tarj, descrip, limite, pago_total, n_cta_asoc FROM TARJETAS
+
+go
+
+CREATE VIEW VER_TRANSFERENCIAS (FECHA, REFERENCIA, CUENTAP, CIT, NOMBRE, CUENTAT, MONTO, COMENTARIO)
+AS SELECT fecha, referencia, n_cta_propia, CI_tercero, nombre_terc, n_cta_terc, monto, comentario FROM TRANSFERENCIAS
+INSERT INTO CLIENTE VALUES ("21343881","MICHELLE","YANG GUI","04122786418","ANGELEMENT26@GMAIL.COM")
+
+go
+
+INSERT INTO CLIENTE VALUES ("84389483","ANDRES","ALBA","0414102023","ANDRES.ALBA1793@GMAIL.COM")
+
+go
+
+INSERT INTO CLIENTE VALUES ("19721069","ANSONY","ROMERO","04164046375","PHYNJOOP@GMAIL.COM")
+
+go
+
+INSERT INTO CLIENTE VALUES ("16870391","CARLOS","BERMUDEZ","0414102023","JOEL391@CANTV.NET")
+
+go
+
+INSERT INTO CLIENTE VALUES ("22222222","FANNY","FERNANDEZ","04142222222","FAFA@HOTMAIL.COM")
+
+go 
+
+INSERT INTO CUENTA VALUES ("21343881","005012345689","AHORRO")
+
+go
+
+INSERT INTO CUENTA VALUES ("21343881","008012345689","CORRIENTE")
+
+go
+
+INSERT INTO CUENTA VALUES ("84389483","0050987654321","AHORRO")
+
+go
+
+INSERT INTO CUENTA VALUES ("84389483","0080987654321","CORRIENTE")
+
+go
+
+INSERT INTO CUENTA VALUES ("19721069","0050232323232","AHORRO")
+
+go
+
+INSERT INTO CUENTA VALUES ("16870391","0080456745674","CORRIENTE")
+
+go
+
+INSERT INTO CUENTA VALUES ("22222222","0050101011112","AHORRO")
+
+go 
+
+INSERT INTO TARJETAS VALUES ("21343881","0475200500232","CREDITO","MICHELLE YANG",30000,"06-16-2015","06-16-2019",0,"","VISA")
+
+go
+
+INSERT INTO TARJETAS VALUES ("21343881","0545900800898","DEBITO","MICHELLE YANG",NULL,"09-23-2014","09-23-2017",0,"008012345689","")
+
+go
+
+INSERT INTO TARJETAS VALUES ("84389483","0475000999888","CREDITO","ANDRES ALBA",40000,"02-14-2014","02-14-2019",0,"","MASTERCARD")
+
+go
+
+INSERT INTO TARJETAS VALUES ("84389483","0545000999777","DEBITO","ANDRES ALBA",NULL,"05-05-2015","05-05-2020",0,"0080987654321","")
+
+go
+
+INSERT INTO TARJETAS VALUES ("84389483","0475111222333","CREDITO","ANDRES ALBA",10000,"10-10-2010","10-10-2015",0,"","VISA")
+
+go
+
+INSERT INTO TARJETAS VALUES ("19721069","0475111999666","DEBITO","ANSONY ROMERO",NULL,"01-21-2014","01-21-2016",0,"0050232323232","")
+
+go
+
+INSERT INTO TARJETAS VALUES ("16870391","0445777323454","DEBITO","CARLOS BERMUDEZ",20000,"01-21-2014","01-21-2016",0,"0080456745674","")
+
+go
+
+INSERT INTO TARJETAS VALUES ("22222222","0475009988767","CREDITO","FANNY FERNANDEZ",30000,"06-11-2015","06-11-2021",0,"","VISA")
+
+go 
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="005012345689",@referencia=1111,@descrip="DEPOSITO",@monto=10000,@fecha="01-17-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="005012345689",@referencia=1112,@descrip="DEPOSITO",@monto=15000,@fecha="02-15-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="005012345689",@referencia=1113,@descrip="RETIRO",@monto=-2000,@fecha="02-17-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="005012345689",@referencia=1114,@descrip="PAGO ELECTRICIDAD",@monto=-450,@fecha="02-20-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="005012345689",@referencia=1115,@descrip="PAGO TELEFONO",@monto=-532,@fecha="02-21-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="005012345689",@referencia=1116,@descrip="RECIBO CHEQUE",@monto=15500,@fecha="02-22-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="005012345689",@referencia=1117,@descrip="CHEQUE DEVUELTO",@monto=-15500,@fecha="02-23-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="005012345689",@referencia=1118,@descrip="RECIBO CHEQUE",@monto=15500,@fecha="02-24-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="005012345689",@referencia=1119,@descrip="DEPOSITO",@monto=20000,@fecha="03-01-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="005012345689",@referencia=1120,@descrip="RETIRO",@monto=-2000,@fecha="03-02-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="005012345689",@referencia=1121,@descrip="RETIRO",@monto=-4000,@fecha="03-03-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="005012345689",@referencia=1123,@descrip="RETIRO",@monto=-500,@fecha="03-03-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="005012345689",@referencia=1124,@descrip="RECIBO CHEQUE",@monto=50000,@fecha="03-15-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="005012345689",@referencia=1125,@descrip="PAGO TELEFONO",@monto=-460,@fecha="03-20-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="005012345689",@referencia=1126,@descrip="PAGO LUZ",@monto=-380,@fecha="03-21-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="005012345689",@referencia=1127,@descrip="DEPOSITO",@monto=4000,@fecha="04-15-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="005012345689",@referencia=1128,@descrip="RETIRO",@monto=-3000,@fecha="05-15-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="005012345689",@referencia=1129,@descrip="RETIRO",@monto=-2000,@fecha="05-16-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="005012345689",@referencia=1130,@descrip="RETIRO",@monto=-2000,@fecha="05-16-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="005012345689",@referencia=1131,@descrip="RECIBO CHEQUE",@monto=15000,@fecha="06-16-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="008012345689",@referencia=1132,@descrip="DEPOSITO",@monto=10000,@fecha="04-13-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="008012345689",@referencia=1133,@descrip="PAGO DE LUZ",@monto=-500,@fecha="04-15-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="008012345689",@referencia=1134,@descrip="PAGO DE TELEFONO",@monto=-300,@fecha="04-15-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="008012345689",@referencia=1135,@descrip="RETIRO",@monto=-4000,@fecha="04-20-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="008012345689",@referencia=1136,@descrip="RETIRO",@monto=-2000,@fecha="04-21-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="008012345689",@referencia=1137,@descrip="DEPOSITO",@monto=5000,@fecha="05-15-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="008012345689",@referencia=1138,@descrip="RETIRO",@monto=-1000,@fecha="06-11-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0050987654321",@referencia=2001,@descrip="DEPOSITO",@monto=15000,@fecha="02-15-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0050987654321",@referencia=2002,@descrip="DEPOSITO",@monto=20000,@fecha="03-15-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0050987654321",@referencia=2003,@descrip="PAGO TELEFONO",@monto=-400,@fecha="03-16-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0050987654321",@referencia=2004,@descrip="PAGO LUZ",@monto=-354,@fecha="03-15-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0050987654321",@referencia=2005,@descrip="RECIBO CHEQUE",@monto=17000,@fecha="03-17-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0050987654321",@referencia=2006,@descrip="CHEQUE DEVUELTO",@monto=-17000,@fecha="03-18-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0050987654321",@referencia=2007,@descrip="RETIRO",@monto=-700,@fecha="03-18-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0050987654321",@referencia=2008,@descrip="RECIBO CHEQUE",@monto=17000,@fecha="04-01-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0050987654321",@referencia=2009,@descrip="PAGO DE ELECTRICIDAD",@monto=-400,@fecha="04-17-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0050987654321",@referencia=2010,@descrip="PAGO DE TELEFONO",@monto=-200,@fecha="04-17-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0050987654321",@referencia=2011,@descrip="RECIBO CHEQUE",@monto=10000,@fecha="05-15-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0050987654321",@referencia=2012,@descrip="RETIRO",@monto=-1000,@fecha="05-19-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0050987654321",@referencia=2013,@descrip="RETIRO",@monto=-1500,@fecha="05-20-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0050987654321",@referencia=2014,@descrip="DEPOSITO",@monto=3000,@fecha="05-23-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0050987654321",@referencia=2015,@descrip="RETIRO",@monto=-1000,@fecha="05-24-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0050987654321",@referencia=2016,@descrip="RETIRO",@monto=-1700,@fecha="06-11-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0080987654321",@referencia=2017,@descrip="DEPOSITO",@monto=10000,@fecha="01-12-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0080987654321",@referencia=2018,@descrip="DEPOSITO",@monto=3500,@fecha="01-13-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0080987654321",@referencia=2019,@descrip="DEPOSITO",@monto=5000,@fecha="01-14-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0080987654321",@referencia=2020,@descrip="RECIBO CHEQUE",@monto=20000,@fecha="02-18-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0080987654321",@referencia=2021,@descrip="RETIRO",@monto=-1000,@fecha="02-20-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0080987654321",@referencia=2022,@descrip="RETIRO",@monto=-2000,@fecha="02-21-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0080987654321",@referencia=2023,@descrip="RETIRO",@monto=-2000,@fecha="02-22-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0080987654321",@referencia=2024,@descrip="RETIRO",@monto=-500,@fecha="02-23-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0080987654321",@referencia=2025,@descrip="RETIRO",@monto=-800,@fecha="02-24-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0080987654321",@referencia=2026,@descrip="RETIRO",@monto=-1000,@fecha="03-15-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0080987654321",@referencia=2027,@descrip="RECIBO CHEQUE",@monto=15000,@fecha="04-15-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0080987654321",@referencia=2028,@descrip="RETIRO",@monto=-6000,@fecha="06-18-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0050232323232",@referencia=3111,@descrip="DEPOSITO",@monto=15000,@fecha="02-01-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0050232323232",@referencia=3112,@descrip="RECIBO DE CHEQUE",@monto=20000,@fecha="02-02-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0050232323232",@referencia=3113,@descrip="PAGO DE ELECTRICIDAD",@monto=-500,@fecha="02-15-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0050232323232",@referencia=3114,@descrip="PAGO DE TELEFONO",@monto=-356,@fecha="02-16-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0050232323232",@referencia=3115,@descrip="RETIRO",@monto=-1500,@fecha="02-18-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0050232323232",@referencia=3116,@descrip="RETIRO",@monto=-2000,@fecha="02-20-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0050232323232",@referencia=3117,@descrip="RETIRO",@monto=-700,@fecha="02-22-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0050232323232",@referencia=3118,@descrip="RETIRO",@monto=-4000,@fecha="03-23-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0050232323232",@referencia=3119,@descrip="DEPOSITO",@monto=5000,@fecha="03-24-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0050232323232",@referencia=3120,@descrip="TRANSFERENCIA",@monto=500,@fecha="03-25-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0050232323232",@referencia=3121,@descrip="DEPOSITO",@monto=7000,@fecha="03-28-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0050232323232",@referencia=3122,@descrip="RETIRO",@monto=-800,@fecha="03-29-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0050232323232",@referencia=3123,@descrip="PAGO DE ELECTRICIDAD",@monto=-444,@fecha="04-13-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0050232323232",@referencia=3124,@descrip="PAGO DE TELEFONO",@monto=-345,@fecha="04-15-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0050232323232",@referencia=3125,@descrip="RECIBO DE CHEQUE",@monto=20000,@fecha="04-20-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0050232323232",@referencia=3126,@descrip="CHEQUE DEVUELTO",@monto=-20000,@fecha="04-21-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0050232323232",@referencia=3127,@descrip="RECIBO DE CHEQUE",@monto=20000,@fecha="04-24-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0050232323232",@referencia=3128,@descrip="RETIRO",@monto=-900,@fecha="05-15-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0050232323232",@referencia=3129,@descrip="PAGO DE TELEFONO",@monto=-432,@fecha="05-16-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0050232323232",@referencia=3130,@descrip="PAGO DE ELECTRICIDAD",@monto=-605,@fecha="05-17-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0080456745674",@referencia=4001,@descrip="DEPOSITO",@monto=10000,@fecha="03-25-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0080456745674",@referencia=4002,@descrip="DEPOSITO",@monto=15000,@fecha="03-26-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0080456745674",@referencia=4003,@descrip="RETIRO",@monto=-1300,@fecha="03-27-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0080456745674",@referencia=4004,@descrip="RETIRO",@monto=-1800,@fecha="03-29-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0080456745674",@referencia=4005,@descrip="RECIBO CHEQUE",@monto=20000,@fecha="04-01-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0080456745674",@referencia=4006,@descrip="DEPOSITO",@monto=25000,@fecha="04-02-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0080456745674",@referencia=4007,@descrip="PAGO DE TELEFONO",@monto=-455,@fecha="04-03-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0080456745674",@referencia=4008,@descrip="RETIRO",@monto=-5000,@fecha="04-04-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0080456745674",@referencia=4009,@descrip="RECIBO CHEQUE",@monto=20000,@fecha="04-05-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0080456745674",@referencia=4010,@descrip="CHEQUE DEVUELTO",@monto=-20000,@fecha="04-06-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0080456745674",@referencia=4011,@descrip="DEPOSITO",@monto=2000,@fecha="04-07-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0080456745674",@referencia=4012,@descrip="RECIBO CHEQUE",@monto=20000,@fecha="04-08-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0080456745674",@referencia=4013,@descrip="CHEQUE",@monto=-12000,@fecha="04-09-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0080456745674",@referencia=4014,@descrip="CHEQUE",@monto=-10000,@fecha="04-15-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0080456745674",@referencia=4015,@descrip="PAGO DE ELECTRICIDAD",@monto=-578,@fecha="04-16-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0080456745674",@referencia=4016,@descrip="PAGO DE TELEFONO",@monto=-478,@fecha="04-17-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0080456745674",@referencia=4017,@descrip="RETIRO",@monto=-2600,@fecha="05-02-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0080456745674",@referencia=4018,@descrip="RETIRO",@monto=-600,@fecha="05-03-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0080456745674",@referencia=4019,@descrip="RETIRO",@monto=-700,@fecha="05-06-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0080456745674",@referencia=4020,@descrip="RETIRO",@monto=-670,@fecha="05-08-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0080456745674",@referencia=4021,@descrip="DEPOSITO",@monto=30000,@fecha="05-15-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0080456745674",@referencia=4022,@descrip="PAGO DE TELEFONO",@monto=-350,@fecha="06-02-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0050101011112",@referencia=5001,@descrip="DEPOSITO",@monto=12000,@fecha="03-26-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0050101011112",@referencia=5002,@descrip="DEPOSITO",@monto=10000,@fecha="03-26-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0050101011112",@referencia=5003,@descrip="RETIRO",@monto=-1400,@fecha="03-28-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0050101011112",@referencia=5004,@descrip="RETIRO",@monto=-1900,@fecha="03-30-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0050101011112",@referencia=5005,@descrip="RECIBO CHEQUE",@monto=40000,@fecha="04-02-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0050101011112",@referencia=5006,@descrip="DEPOSITO",@monto=7000,@fecha="04-02-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0050101011112",@referencia=5007,@descrip="PAGO DE TELEFONO",@monto=-456,@fecha="04-03-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0050101011112",@referencia=5008,@descrip="RETIRO",@monto=-5000,@fecha="04-14-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0050101011112",@referencia=5009,@descrip="RECIBO CHEQUE",@monto=8000,@fecha="04-18-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0050101011112",@referencia=5010,@descrip="CHEQUE DEVUELTO",@monto=-8000,@fecha="04-21-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0050101011112",@referencia=5011,@descrip="DEPOSITO",@monto=3000,@fecha="04-25-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0050101011112",@referencia=5012,@descrip="RECIBO CHEQUE",@monto=20000,@fecha="04-25-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0050101011112",@referencia=5013,@descrip="PAGO DE ELECTRICIDAD",@monto=-578,@fecha="04-26-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0080456745674",@referencia=5014,@descrip="RETIRO",@monto=-5000,@fecha="05-15-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0080456745674",@referencia=5015,@descrip="PAGO DE ELECTRICIDAD",@monto=-578,@fecha="05-16-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0080456745674",@referencia=5016,@descrip="PAGO DE TELEFONO",@monto=-478,@fecha="05-17-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0080456745674",@referencia=5017,@descrip="RETIRO",@monto=-2600,@fecha="05-02-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0080456745674",@referencia=5018,@descrip="RETIRO",@monto=-600,@fecha="05-03-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0080456745674",@referencia=5019,@descrip="RETIRO",@monto=-700,@fecha="05-06-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0080456745674",@referencia=5020,@descrip="RETIRO",@monto=-670,@fecha="05-08-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0080456745674",@referencia=5021,@descrip="DEPOSITO",@monto=30000,@fecha="05-15-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0080456745674",@referencia=5022,@descrip="PAGO DE TELEFONO",@monto=-350,@fecha="06-02-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0080456745674",@referencia=5023,@descrip="RETIRO",@monto=-700,@fecha="06-03-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0080456745674",@referencia=5024,@descrip="RETIRO",@monto=-900,@fecha="06-04-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0080456745674",@referencia=5025,@descrip="RETIRO",@monto=-950,@fecha="06-05-2015"
+
+go 
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0475200500232",@referencia=1200,@descrip="ACCESORIOS C'S STORE",@monto=2000,@fecha="03-01-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0475200500232",@referencia=1201,@descrip="RESTAURANTE EL CHEF",@monto=4000,@fecha="03-02-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0475200500232",@referencia=1202,@descrip="SAMSUNG STORE",@monto=10000,@fecha="03-02-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0475200500232",@referencia=1203,@descrip="SAMSUNG STORE",@monto=5000,@fecha="03-03-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="005012345689",@referencia=1204,@descrip="PAGO DE TARJETA DE CREDITO",@monto=-15000,@fecha="03-03-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0475200500232",@referencia=1204,@descrip="PAGO DE TARJETA DE CREDITO",@monto=-15000,@fecha="03-03-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0475200500232",@referencia=1205,@descrip="TIENDA OVEJITAS",@monto=5000,@fecha="03-15-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0475200500232",@referencia=1206,@descrip="TIENDA SARA",@monto=9270,@fecha="03-20-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0475200500232",@referencia=1207,@descrip="SERVICIO TECNICO COMP.",@monto=500,@fecha="03-22-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0475200500232",@referencia=1208,@descrip="PAGO DE TARJETA DE CREDITO.",@monto=-10000,@fecha="03-23-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="005012345689",@referencia=1208,@descrip="PAGO DE TARJETA DE CREDITO",@monto=-10000,@fecha="03-23-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0475200500232",@referencia=1209,@descrip="FARMATODO AV. BARALT",@monto=3000,@fecha="04-23-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0475200500232",@referencia=1210,@descrip="FARAHORRO CHACAO",@monto=600,@fecha="05-23-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0475200500232",@referencia=1211,@descrip="PAGO DE TARJETA DE CREDITO.",@monto=-2000,@fecha="03-23-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="005012345689",@referencia=1211,@descrip="PAGO DE TARJETA DE CREDITO",@monto=-2000,@fecha="03-23-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0545900800898",@referencia=1400,@descrip="DISPENSARIO ADVENTISTA",@monto=1000,@fecha="04-23-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0545900800898",@referencia=1401,@descrip="DISPENSARIO ADVENTISTA",@monto=500,@fecha="04-24-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0545900800898",@referencia=1402,@descrip="MCDONALDS SAMBIL",@monto=850,@fecha="04-29-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0545900800898",@referencia=1403,@descrip="MCDONALDS SAMBIL",@monto=100,@fecha="04-29-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0545900800898",@referencia=1404,@descrip="CINES UNIDOS",@monto=1500,@fecha="05-01-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0545900800898",@referencia=1405,@descrip="LIBRERIA LAPIZ AMERICANO",@monto=340,@fecha="05-03-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0545900800898",@referencia=1406,@descrip="FARMATODO QUINTA CRESPO",@monto=390,@fecha="05-09-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0545900800898",@referencia=1407,@descrip="CAFETERIA LA HORQUILLA",@monto=880,@fecha="06-03-2015"
+
+go 
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0545900800898",@referencia=1408,@descrip="DISPENSARIO ADVENTISTA",@monto=1000,@fecha="06-04-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0545900800898",@referencia=1409,@descrip="PAPELERIA LOS ANGELES",@monto=200,@fecha="06-05-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0545900800898",@referencia=1410,@descrip="ZAPATERIA 108",@monto=1200,@fecha="06-06-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="008012345689",@referencia=1411,@descrip="TRANSFERENCIA",@monto=20000,@fecha="03-26-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0475000999888",@referencia=2100,@descrip="ZAPATERIA ROBERTO",@monto=4000,@fecha="03-06-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0475000999888",@referencia=2101,@descrip="TIENDA ROPA",@monto=2800,@fecha="03-08-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0475000999888",@referencia=2102,@descrip="WENDY'S EL PARAISO",@monto=900,@fecha="03-10-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0475000999888",@referencia=2103,@descrip="SUPERMERCADO PLAZAS",@monto=1500,@fecha="03-12-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0475000999888",@referencia=2104,@descrip="SUPERMERCADO PLAZAS",@monto=2600,@fecha="03-23-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0475000999888",@referencia=2105,@descrip="FARMATODO EL PARAISO",@monto=999,@fecha="04-12-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0475000999888",@referencia=2106,@descrip="REPUESTOS AUTOMOVILES",@monto=15000,@fecha="04-13-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0475000999888",@referencia=2107,@descrip="PAGO TARJETA DE CREDITO",@monto=-16000,@fecha="04-14-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0050987654321",@referencia=2107,@descrip="PAGO DE TARJETA DE CREDITO",@monto=-16000,@fecha="04-14-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0475000999888",@referencia=2108,@descrip="ACCESORIOS TELEFONOS MOVILES",@monto=3500,@fecha="05-11-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0475000999888",@referencia=2109,@descrip="FARMACIA SASS",@monto=1000,@fecha="05-13-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0475000999888",@referencia=2110,@descrip="SUPERMERCADO VICTORIA",@monto=960,@fecha="05-23-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0545000999777",@referencia=2200,@descrip="RETIRO",@monto=1000,@fecha="03-23-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0545000999777",@referencia=2201,@descrip="RETIRO",@monto=1000,@fecha="03-23-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0545000999777",@referencia=2202,@descrip="CLINICA CARACAS",@monto=2000,@fecha="03-25-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0545000999777",@referencia=2203,@descrip="FARMATODO",@monto=200,@fecha="03-28-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0545000999777",@referencia=2204,@descrip="UNIVERSIDAD SANTA MARIA",@monto=6000,@fecha="04-28-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0545000999777",@referencia=2205,@descrip="FARMATODO",@monto=220,@fecha="04-29-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0545000999777",@referencia=2206,@descrip="PANADERIA LOS RUICES",@monto=223,@fecha="05-01-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0545000999777",@referencia=2207,@descrip="RETIRO",@monto=500,@fecha="05-02-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0545000999777",@referencia=2208,@descrip="RETIRO",@monto=600,@fecha="05-04-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0545000999777",@referencia=2209,@descrip="RETIRO",@monto=700,@fecha="05-05-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0545000999777",@referencia=2210,@descrip="UNIVERSIDAD SANTA MARIA",@monto=1700,@fecha="05-14-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0545000999777",@referencia=2211,@descrip="ACCESORIOS TELEFONICOS",@monto=3000,@fecha="05-15-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0545000999777",@referencia=2212,@descrip="LICORERIA ALEJANDRO",@monto=1424,@fecha="05-16-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0545000999777",@referencia=2213,@descrip="FARMATODO",@monto=494,@fecha="05-17-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0545000999777",@referencia=2214,@descrip="RETIRO CAJERO 21",@monto=900,@fecha="05-19-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0545000999777",@referencia=2215,@descrip="RETIRO CAJERO 21",@monto=1500,@fecha="05-20-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0545000999777",@referencia=2216,@descrip="RETIRO CAJERO 25",@monto=2000,@fecha="05-21-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0545000999777",@referencia=2217,@descrip="RESTAURANTE ALEBRI",@monto=2000,@fecha="05-22-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0545000999777",@referencia=2218,@descrip="UNIVERSIDAD SANTA MARIA",@monto=2000,@fecha="06-2-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0475111222333",@referencia=2300,@descrip="UNIVERSIDAD SANTA MARIA",@monto=7580,@fecha="01-02-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0475111222333",@referencia=2301,@descrip="PAGO DE TARJETA DE CREDITO",@monto=-7580,@fecha="01-06-2015"
+
+go 
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0050987654321",@referencia=2301,@descrip="PAGO DE TARJETA DE CREDITO",@monto=-7580,@fecha="01-06-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0050987654321",@referencia=2052,@descrip="RECIBO CHEQUE",@monto=29080,@fecha="06-18-2015"
+
+go
+
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0475111222333",@referencia=2302,@descrip="RECARGA EN LINEA MOVISTAR",@monto=500,@fecha="01-06-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0475111222333",@referencia=2303,@descrip="RECARGA EN LINEA MOVISTAR",@monto=600,@fecha="02-06-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0475111222333",@referencia=2304,@descrip="RECARGA EN LINEA MOVISTAR",@monto=450,@fecha="03-07-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0475111222333",@referencia=2305,@descrip="RECARGA EN LINEA MOVISTAR",@monto=560,@fecha="04-07-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0475111222333",@referencia=2306,@descrip="RECARGA EN LINEA MOVISTAR",@monto=700,@fecha="05-07-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0475111222333",@referencia=2307,@descrip="RECARGA EN LINEA DIGITEL",@monto=500,@fecha="04-09-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0475111222333",@referencia=2308,@descrip="RECARGA EN LINEA MOVILNET",@monto=300,@fecha="04-22-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0475111222333",@referencia=2309,@descrip="FARMACIA SUSANA",@monto=952,@fecha="05-12-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0475111222333",@referencia=2310,@descrip="TIENDA PING PONG",@monto=980,@fecha="05-15-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0475111222333",@referencia=2311,@descrip="PAGO DE TARJETA DE CREDITO",@monto=-1000,@fecha="05-24-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0050987654321",@referencia=2311,@descrip="PAGO DE TARJETA DE CREDITO",@monto=-1000,@fecha="05-24-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0475111999666",@referencia=3201,@descrip="RETIRO",@monto=1000,@fecha="04-24-2015"
+
+go 
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0475111999666",@referencia=3202,@descrip="RETIRO",@monto=1000,@fecha="04-25-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0475111999666",@referencia=3203,@descrip="PANADERIA SAN ANTONIO",@monto=600,@fecha="04-25-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0475111999666",@referencia=3204,@descrip="FARMATODO SABANA GRANDE",@monto=1250,@fecha="04-26-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0475111999666",@referencia=3205,@descrip="RESTAURANTE LA FAMILIA",@monto=5000,@fecha="04-27-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0475111999666",@referencia=3206,@descrip="RETIRO",@monto=2000,@fecha="04-28-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0475111999666",@referencia=3207,@descrip="RETIRO",@monto=500,@fecha="04-29-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0475111999666",@referencia=3208,@descrip="PANADERIA SAN ANTONIO",@monto=854,@fecha="05-12-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0475111999666",@referencia=3209,@descrip="UNIVERSIDAD SANTA MARIA",@monto=7504,@fecha="05-15-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0475111999666",@referencia=3210,@descrip="RETIRO",@monto=900,@fecha="05-12-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0475111999666",@referencia=3211,@descrip="RETIRO",@monto=500,@fecha="05-20-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0475111999666",@referencia=3212,@descrip="FARMACIA EL SILENCIO",@monto=854,@fecha="05-22-2015"
+
+go
+
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0475111999666",@referencia=3213,@descrip="LICOLERIA SAN MARTIN",@monto=1200,@fecha="05-23-2015"
+
+go
+
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0475111999666",@referencia=3214,@descrip="RETIRO CAJERO 23",@monto=400,@fecha="05-29-2015"
+
+go
+
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0475111999666",@referencia=3215,@descrip="UNIVERSIDAD SANTA MARIA",@monto=1700,@fecha="06-01-2015"
+
+go
+
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0475111999666",@referencia=3216,@descrip="QUINCALLERIA PING PONG",@monto=2004,@fecha="06-02-2015"
+
+go
+
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0475111999666",@referencia=3217,@descrip="FARMACIA EL SILENCIO",@monto=854,@fecha="06-03-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0050232323232",@referencia=3153,@descrip="DEPOSITO",@monto=10000,@fecha="06-04-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0475111999666",@referencia=3218,@descrip="SUBWAY UNIVERSIDAD SANTA MARIA",@monto=840,@fecha="06-05-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0475111999666",@referencia=3219,@descrip="KFC CHACAO",@monto=659,@fecha="06-06-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0475111999666",@referencia=3220,@descrip="RETIRO",@monto=2000,@fecha="06-05-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0445777323454",@referencia=4201,@descrip="RESTAURANTE SAN JOSE",@monto=2000,@fecha="03-05-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0445777323454",@referencia=4202,@descrip="FARMATODO LOS RUICES",@monto=1000,@fecha="03-06-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0445777323454",@referencia=4203,@descrip="LIBRERIA NAVARRO",@monto=780,@fecha="03-07-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0445777323454",@referencia=4204,@descrip="ACCESORIOS MOVILES",@monto=1580,@fecha="03-08-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0445777323454",@referencia=4205,@descrip="BURGER KING EL PARAISO",@monto=730,@fecha="03-09-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0445777323454",@referencia=4206,@descrip="PANADERIA LOS LAURELES",@monto=987,@fecha="03-10-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0445777323454",@referencia=4208,@descrip="UNIVERSIDAD SANTA MARIA",@monto=7980,@fecha="04-20-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0445777323454",@referencia=4210,@descrip="INSTITUTO CVA",@monto=1200,@fecha="04-27-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0445777323454",@referencia=4211,@descrip="RESTAURANTE MEAT",@monto=3000,@fecha="05-01-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0445777323454",@referencia=4212,@descrip="RESTAURANTE MEAT",@monto=4000,@fecha="05-02-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0445777323454",@referencia=4214,@descrip="CINES UNIDOS",@monto=1000,@fecha="05-20-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0445777323454",@referencia=4215,@descrip="COMPU MALL SAMBIL",@monto=2000,@fecha="05-21-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0445777323454",@referencia=4216,@descrip="SAMSUNG SAMBIL",@monto=5000,@fecha="05-22-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0445777323454",@referencia=4217,@descrip="FARMATODO LOS RUICES",@monto=979,@fecha="05-23-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0475009988767",@referencia=5200,@descrip="RESTAURANTE DING DING",@monto=5800,@fecha="04-01-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0475009988767",@referencia=5201,@descrip="FARMATODO PTO LA CRUZ",@monto=2000,@fecha="04-02-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0475009988767",@referencia=5202,@descrip="PAGO DE TARJETA DE CREDITO",@monto=-7800,@fecha="04-12-2015"
+
+go
+
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0050101011112",@referencia=5202,@descrip="PAGO DE TARJETA DE CREDITO",@monto=-7800,@fecha="04-12-2015"
+
+go
+
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0475009988767",@referencia=5203,@descrip="PAPELERIA ARCOIRIS",@monto=1340,@fecha="04-15-2015"
+
+go
+
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0475009988767",@referencia=5204,@descrip="CHARCUTERIA LAS EMPANADAS",@monto=350,@fecha="04-16-2015"
+
+go
+
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0475009988767",@referencia=5205,@descrip="RECARGA EN LINEA MOVILNET",@monto=600,@fecha="04-17-2015"
+
+go
+
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0475009988767",@referencia=5206,@descrip="SUBWAY EL PARAISO",@monto=1000,@fecha="04-20-2015"
+
+go
+
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0475009988767",@referencia=5207,@descrip="FARMACIA SANTA ANA",@monto=230,@fecha="05-01-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0475009988767",@referencia=5208,@descrip="LABORATORIO SAN JOSE",@monto=2560,@fecha="05-04-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0475009988767",@referencia=5209,@descrip="PAGO DE TARJETA DE CREDITO",@monto=-4000,@fecha="05-15-2015"
+
+go
+
+EXECUTE ins_TRANS_CUENTAS @n_cta="0050101011112",@referencia=5209,@descrip="PAGO DE TARJETA DE CREDITO",@monto=-400,@fecha="05-15-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0475009988767",@referencia=5210,@descrip="TERMINAL AUTOBUSES CHACAO",@monto=1245,@fecha="06-02-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0475009988767",@referencia=5211,@descrip="PANADERIA PTO LA CRUZ",@monto=120,@fecha="06-03-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0475009988767",@referencia=5212,@descrip="MCDONALD'S",@monto=678,@fecha="06-04-2015"
+
+go
+
+EXECUTE ins_TRANS_TARJETAS @n_tarj="0475009988767",@referencia=5213,@descrip="ACCESORIOS MOVILES",@monto=6045,@fecha="06-05-2015"
+
+go
+
+INSERT IMG_SEGURIDAD VALUES ("1111",'Brightness.png')
+
+go
+
+INSERT IMG_SEGURIDAD VALUES ("2222",'Clock.png')
+
+go
+
+INSERT IMG_SEGURIDAD VALUES ("3333",'Home.png')
+
+go
+
+INSERT IMG_SEGURIDAD VALUES ("4444",'Signal.png')
+
+go
+
+INSERT IMG_SEGURIDAD VALUES ("5555",'Update.png')
